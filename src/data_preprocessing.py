@@ -1,5 +1,7 @@
 # In: src/data_processing.py
 
+
+
 import pandas as pd
 
 def load_parquet_to_df(file_path):
@@ -14,8 +16,18 @@ def load_parquet_to_df(file_path):
     """
     try:
         df = pd.read_parquet(file_path)
+        df = simplify_columns(df)
         return df
     except FileNotFoundError:
         print(f"Error: The file was not found at {file_path}")
         return None
+    
+def simplify_columns(df):
+    original_columns = df.columns.tolist()
+    new_columns = [col.split('/')[0].lower() for col in original_columns]
+    print(new_columns)
+
+    df.columns = new_columns
+
+    return df
     
