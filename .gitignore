@@ -1,10 +1,10 @@
 data.zip
 data/fuites_experiencia_client.parquet
 data/repte_consums_anomals.parquet
+data/consum_total_agregat.parquet
+data/incidencies_comptadors_intelligents.parquet
 data/sample_fuites_experiencia_client.parquet
 data/sample_repte_consums_anomals.parquet
-data/sample_consum_total_agregat.parquet
-data/sample_incidencies_comptadors_intelligents.parquet
 data/sample_consum_total_agregat.parquet
 data/sample_incidencies_comptadors_intelligents.parquet
 *.parquet
