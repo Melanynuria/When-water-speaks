@@ -24,7 +24,7 @@ def load_parquet_to_df(file_path):
     
 def simplify_columns(df):
     original_columns = df.columns.tolist()
-    new_columns = [col.split('/')[0].lower() for col in original_columns]
+    new_columns = [col.split('/')[0] for col in original_columns]
     print(new_columns)
 
     df.columns = new_columns
