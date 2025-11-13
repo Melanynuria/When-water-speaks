@@ -128,5 +128,33 @@ def euros_per_m3(liters, service_type):
     return price
 
 
-    
-    
+def get_next_month_bill(price):
+    '''
+    price is the water consumption price computed. 
+    This function calculates the total amount of the next month bill. 
+    '''
+    #include IVA (10%)
+    price = price * 1.1
+
+    #canon aigua 
+    price += 6.91
+
+    #clavegueram 
+    price += 3.09
+
+    #tractament de residus
+    price += 11.43
+
+    #recollida de residus 
+    price += 10.19
+
+    return price 
+
+
+
+
+
+
+
+
+
