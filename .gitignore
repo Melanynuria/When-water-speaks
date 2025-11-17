@@ -9,3 +9,4 @@ data/sample_consum_total_agregat.parquet
 data/sample_incidencies_comptadors_intelligents.parquet
 *.parquet
 *.parquet
+venv/
