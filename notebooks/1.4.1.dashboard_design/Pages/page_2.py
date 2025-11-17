@@ -3,11 +3,12 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+import plotly.express as px
 import os
 import sys
 from pathlib import Path
 
-
+#import function from source
 current_dir = os.path.dirname(__file__)
 project_root = os.path.abspath(os.path.join(current_dir, "../../../"))
 if project_root not in sys.path:
@@ -27,6 +28,7 @@ TEXT_PRIMARY = "#1F3A4A"
 TEXT_SECONDARY = "#6B7C8C"
 BG_COLOR = "#F5F8FA"
 
+#page header
 st.markdown(
     f""" <h1 style='text-align: center; color: #050505; background-color:{PRIMARY_LIGHT}; 
     padding: 25px; border-radius: 10px;'>🚨 Detection of Consumption Anomalies</h1>
@@ -45,6 +47,11 @@ st.markdown(
 
 st.divider()
 
+
+#side bar configuration
+st.sidebar.header("⚙️ Configuration")
+data_source=st.sidebar.radio("Data",["Default file", "Load parquet file"],index=0)
+
 @st.cache_data
 def load_default_parquet():
     file ="clean_incidencies_comptadors_intelligents.parquet"
@@ -54,22 +61,12 @@ def load_default_parquet():
     df_ICI=pd.read_parquet(sample_path)
     return df_ICI
 
-@st.cache_data(show_spinner=True)
-def cached_forecast(df,poliza_id):
-    total,forecast_df, df_extended=call_predict_next_month_total_consumption(df, poliza_id)
-    return total, forecast_df, df_extended
-
-
-
-
-st.sidebar.header("⚙️ Configuration")
-data_source=st.sidebar.radio("Data",["Default file", "Load parquet file"],index=0)
 
 if data_source=="Default file":
     df=load_default_parquet()
 else:
-    uploaded=st.sidebar.file_uploader("Load parquet", type=["parquet"])
-    if uploaded is not None:
+    uploaded=st.sidebar.file_uploader("Upload parquet", type=["parquet"])
+    if uploaded:
         df=pd.read_parquet(uploaded)
     else:
         st.stop()
@@ -95,7 +92,7 @@ with st.sidebar.expander("ℹ️ What is the threshold?"):
         """
             The *threshold* controls which points are considered anomalous:
             - **Low** values (1-2): detects more anomalies (more sensative)
-            - **High** values (3-5): detects only very extreme anomalies
+            - **High** values (3-5): detects only extreme anomalies
         """
         )
     
@@ -108,8 +105,8 @@ with st.sidebar.expander("💰 How can you use forecast anomalies to save money?
 
         **How does this help you save money?**
         - If the model detects that your future consumption will be **higher than normal**, you can take action before the bill arrives.
-        - You can adjust habits, check appliances or possible leaks.
-        - Alerts allow you to avoid surprises and betetr control your consumption.
+        - You can adjust habits, **check appliances** or **possible leaks**.
+        - Alerts allow you to **avoid surprises** and better control your consumption.
 
         Adjust threshold as you wish:
         - **Low threshold** → see more alerts and prevent sooner
@@ -118,20 +115,31 @@ with st.sidebar.expander("💰 How can you use forecast anomalies to save money?
     """
 ) 
 
-@st.cache_data
-def detect_anomalies(df,poliza_id,threshold):
-    total,forecast_df,df_extended= cached_forecast(df,poliza_id)
+#caching
+@st.cache_data(show_spinner=True)
+def cached_forecast(df,poliza_id):
+    total,forecast_df, df_extended=call_predict_next_month_total_consumption(df, poliza_id)
+    return total, forecast_df, df_extended
 
+@st.cache_data
+def compute_base(df,poliza_id):
+    total,forecast_df,df_extended= cached_forecast(df,poliza_id)
     df_analysis=df_extended.copy()
     #rolling statistics
     df_analysis["rolling_mean"]=df_analysis["CONSUMO_REAL"].rolling(window=7,min_periods=3).mean()
     df_analysis["rolling_std"]=df_analysis["CONSUMO_REAL"].rolling(window=7,min_periods=3).std()
+    return df_analysis,forecast_df
+
+df_analysis,df_forecast=compute_base(df,poliza_id)
+
+
+def detect_anomalies(df_analysis,df_forecast,threshold):
     df_analysis["z_score"]=(df_analysis["CONSUMO_REAL"]-df_analysis["rolling_mean"])/df_analysis["rolling_std"]
     df_analysis["is_anomaly"]=df_analysis["z_score"].abs()>threshold
     anomalies=df_analysis[df_analysis["is_anomaly"]]
 
     #same with forecasted data
-    df_forecasting=forecast_df.copy()
+    df_forecasting=df_forecast.copy()
     df_forecasting=df_forecasting.merge(df_analysis[["FECHA","rolling_mean","rolling_std"]],on="FECHA",how="left")
     df_forecasting["forecast_z_score"]=((df_forecasting["CONSUMO_REAL"]-df_forecasting["rolling_mean"])/df_forecasting["rolling_std"])
     df_forecasting["forecast_is_anomaly"]=df_forecasting["forecast_z_score"].abs()>threshold
@@ -140,42 +148,55 @@ def detect_anomalies(df,poliza_id,threshold):
     return df_analysis, anomalies, df_forecasting, anomalies_forecast
 
 
-df_analysis,anomalies, df_forecasting, anomalies_forecast=detect_anomalies(df, poliza_id,threshold)
+df_analysis,anomalies, df_forecasting, anomalies_forecast=detect_anomalies(df_analysis, df_forecast,threshold)
 
+#show results
 st.subheader(f"📊Results for invoice {poliza_id}")
 col1,col2=st.columns(2)
+
 with col1:
-    st.metric("Historical anomalies", len(anomalies))
+    st.markdown(f"""<div style='background-color:{PRIMARY_LIGHT}; padding:20px; border-radius:12px; text-align:center;'>
+        <h3 style='margin:0; color:{PRIMARY_DARK};'>Historical anomalies</h3>
+        <p style='font-size:2em; font-weight:bold; color:{TEXT_PRIMARY}; margin:5px 0;'>{len(anomalies)}</p></div>
+    """, unsafe_allow_html=True)
+
 with col2:
-    st.metric("Predicted anomalies",len(anomalies_forecast))
+    st.markdown(f"""<div style='background-color:{SECONDARY_LIGHT}; padding:20px; border-radius:12px; text-align:center;'>
+        <h3 style='margin:0; color:{SECONDARY_DARK};'>Predicted anomalies</h3>
+        <p style='font-size:2em; font-weight:bold; color:{TEXT_PRIMARY}; margin:5px 0;'>{len(anomalies_forecast)}</p></div>
+    """, unsafe_allow_html=True)
 
 st.divider()
 
+#plot anomalies
 st.subheader("📈 Anomalies graph")
-fig,ax= plt.subplots(figsize=(12,6))
-sns.lineplot(data=df_analysis, x="FECHA", y="CONSUMO_REAL", label="Historical Consumption", ax=ax, color=PRIMARY_DARK)
-sns.scatterplot(data=anomalies, x="FECHA", y="CONSUMO_REAL", color="red", label="Historical Anomaly", s=80, ax=ax)
 
-sns.lineplot(data=df_forecasting, x="FECHA", y="CONSUMO_REAL", label="Forecasted Consumption", linestyle="--", ax=ax, color=SECONDARY_DARK)
-sns.scatterplot(data=anomalies_forecast, x="FECHA", y="CONSUMO_REAL", color="orange", label="Forecast Anomaly", s=80, ax=ax)
-
-ax.set_title(f"Detection of anomalies -- Inovice {poliza_id}")
-ax.set_xlabel("Data")
-ax.set_ylabel("Real Consumption")
-plt.xticks(rotation=45)
-plt.tight_layout()
-
-st.pyplot(fig)
+hist = df_analysis[df_analysis["is_forecast"] == False]
+forecast = df_analysis[df_analysis["is_forecast"] == True]
+fig = px.line(hist, x="FECHA", y="CONSUMO_REAL", labels={"CONSUMO_REAL":"Consumption"}, title=f"Invoice {poliza_id}")
+fig.add_scatter(x=anomalies["FECHA"], y=anomalies["CONSUMO_REAL"], mode="markers", marker_color="red", name="Historical Anomaly")
+fig.add_scatter(x=df_forecasting["FECHA"], y=df_forecasting["CONSUMO_REAL"], mode="lines", line=dict(dash="dashdot", color=PRIMARY_DARK, width=5), name="Forecasted Consumption")
+fig.add_scatter(x=anomalies_forecast["FECHA"], y=anomalies_forecast["CONSUMO_REAL"], mode="markers", marker_color="orange", name="Forecast Anomaly")
+st.plotly_chart(fig, use_container_width=True)
 st.divider()
 
 
-
-
+#Show lasts anomalies
+#Only show basic information
+hist_cols=["FECHA","CONSUMO_REAL","is_anomaly"]
+forecast_cols=["FECHA","CONSUMO_REAL","forecast_z_score","forecast_is_anomaly"]
 st.subheader("📄 Latest anomalies detected")
-st.write("### Historical")
-st.dataframe(anomalies.tail(10))
-st.write("### Forecast")
-st.dataframe(anomalies_forecast.tail(10))
+tab1,tab2=st.tabs(["Historical", "Forecast"])
+def color_anomalies(val):
+    return 'background-color: red; color:white' if val else ''
+
+with tab1:
+    df_clean_hist=anomalies[hist_cols].tail(10)
+    st.dataframe(df_clean_hist.style.applymap(color_anomalies, subset=["is_anomaly"]))
+
+with tab2:
+    df_fore_clean=anomalies_forecast[forecast_cols].tail(10)
+    st.dataframe(df_fore_clean.tail(10).style.applymap(color_anomalies, subset=["forecast_is_anomaly"]))
 
 
 if st.sidebar.button("Clear cache"):
