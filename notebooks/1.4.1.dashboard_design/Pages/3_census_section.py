@@ -4,6 +4,7 @@ from pathlib import Path
 import plotly.express as px
 import seaborn as sns
 import matplotlib.pyplot as plt
+import numpy as np
 import sys
 import os
 import math
@@ -43,10 +44,35 @@ file_name = "clean_incidencies_comptadors_intelligents.parquet"
 data_path = os.path.join(data_dir, file_name)
 
 @st.cache_data
-def load_data():
-    return pd.read_parquet(data_path)
+def load_data(date_filter=None):
+
+    # Columns we actually need
+    columns_to_load = ["FECHA", "SECCIO_CENSAL", "CONSUMO_REAL", "US_AIGUA_GEST"]
+    
+    # Load parquet with only these columns
+    df = pd.read_parquet(data_path, columns=columns_to_load)
+    
+    df["FECHA"] = pd.to_datetime(df["FECHA"])
+    if date_filter is not None:
+        start_date, end_date = date_filter
+        df = df[(df["FECHA"] >= start_date) & (df["FECHA"] <= end_date)]
+    
+
+    df["CONSUMO_REAL"] = pd.to_numeric(df["CONSUMO_REAL"], errors="coerce").astype("float32")
+    if "SECCIO_CENSAL" in df.columns:
+        df["SECCIO_CENSAL_STR"] = df["SECCIO_CENSAL"].apply(
+            lambda x: str(int(x)).zfill(10) if pd.notna(x) else None
+        ).astype("category")
+    else:
+        df["SECCIO_CENSAL_STR"] = None
+    
+    if "US_AIGUA_GEST" in df.columns:
+        df["US_AIGUA_GEST"] = df["US_AIGUA_GEST"].astype("category")
+    
+    return df
 
 df = load_data()
+
 
 # -------------------------------
 # Page Title
@@ -67,297 +93,193 @@ st.markdown(
 )
 
 st.divider()
+
+
 # -------------------------------
-# User Input
+# User input
 # -------------------------------
-if 'SECCIO_CENSAL' in df.columns:
-    seccio_censal_codes = df['SECCIO_CENSAL'].unique().tolist()
-    # Convert secció censal codes to strings (and pad with zeros if needed)
-    seccio_censal_codes_str = [str(int(c)).zfill(10) for c in seccio_censal_codes if c is not None and not (isinstance(c, float) and math.isnan(c))]
+seccio_codes_str = sorted(df["SECCIO_CENSAL_STR"].dropna().unique().tolist()) if "SECCIO_CENSAL_STR" in df.columns else []
 
-else:
-    seccio_censal_codes = []
+user_input = st.sidebar.text_input("Enter SECCIO_CENSAL code:")
+filtered_codes = [p for p in seccio_codes_str if p.startswith(user_input)] if user_input else seccio_codes_str
 
-user_input=st.sidebar.text_input("Introduce your SECCIO_CENSAL code:")
-
-if user_input:
-    filtered_codes=[p for p in seccio_censal_codes_str if p.startswith(user_input)]
-else:
-    filtered_codes=seccio_censal_codes
-
-if user_input and len(filtered_codes)==0:
-    st.sidebar.error("The invoice introduced does not exist in our dataset."
-                     "Review that there are no typos or confirm that you reside in Barcelona")
+if user_input and len(filtered_codes) == 0:
+    st.sidebar.error("Code not found in dataset. Check typos or residence.")
     st.stop()
 
-codi_censal= float(st.sidebar.selectbox("Matching codes",filtered_codes))
+codi_censal = st.sidebar.selectbox("Matching codes", filtered_codes)
 
-if codi_censal:
-    exists_msg = ''
-    if seccio_censal_codes:
-        exists_msg = ('found in dataset' if codi_censal in seccio_censal_codes else 'There is no data available for this census section.')
-
-date_range = st.sidebar.date_input(
-    "Select Date Range",
-    [df["FECHA"].min(), df["FECHA"].max()]
-)
-if isinstance(date_range, tuple) and len(date_range) == 2:
-    start_date, end_date = date_range
-else:
-    # If user picks only a single date, use it as both min and max
-    start_date = end_date = date_range
-
+date_range = st.sidebar.date_input("Select Date Range", [df["FECHA"].min(), df["FECHA"].max()])
+start_date, end_date = pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])
 
 # -------------------------------
-# Consumption Trend by Use Type
+# Filter data for section and date range
 # -------------------------------
+df_section = df[df["SECCIO_CENSAL_STR"] == codi_censal]
+df_section = df_section[(df_section["FECHA"] >= start_date) & (df_section["FECHA"] <= end_date)].copy()
 
-if codi_censal in seccio_censal_codes:
-    df_filtered = df[df["SECCIO_CENSAL"] == codi_censal].copy()
+if df_section.empty:
+    st.warning("No data for this section and date range.")
+    st.stop()
 
-    df_filtered["FECHA"] = pd.to_datetime(df_filtered["FECHA"], errors="coerce")
 
 
-# Apply date filter
-if len(date_range) == 2:
-    df_filtered = df_filtered[
-        (df_filtered["FECHA"] >= pd.to_datetime(start_date)) &
-        (df_filtered["FECHA"] <= pd.to_datetime(end_date))
-    ]
-
-    df_filtered["CONSUMO_REAL"] = pd.to_numeric(df_filtered["CONSUMO_REAL"], errors="coerce")
-
-    df_plot = df_filtered.dropna(subset=["FECHA", "US_AIGUA_GEST", "CONSUMO_REAL"])
-
-    monthly_use = (
-        df_plot
-        .groupby([df_plot["FECHA"].dt.to_period("M"), "US_AIGUA_GEST"])["CONSUMO_REAL"]
-        .sum()
-        .reset_index()
-    )
-
-    monthly_use["FECHA"] = monthly_use["FECHA"].dt.to_timestamp()
-    monthly_use = monthly_use.sort_values("FECHA")
-
-    fig, ax = plt.subplots(figsize=(12, 6))
-    sns.lineplot(
-        data=monthly_use,
-        x="FECHA",
-        y="CONSUMO_REAL",
-        hue="US_AIGUA_GEST",
-        marker="o",
-        ax=ax
-    )
-
-    ax.set_title(f"Monthly Water Consumption by Use Type – Section {codi_censal}")
-    ax.set_xlabel("Month")
-    ax.set_ylabel("Total Consumption (m³)")
-    ax.tick_params(axis='x', rotation=45)
-    st.pyplot(fig)
-    
-    section_data = df_filtered[df_filtered["SECCIO_CENSAL"] == codi_censal]
-
-    total_consumption = section_data["CONSUMO_REAL"].sum()
-    average_daily = section_data["CONSUMO_REAL"].mean()
-
-    # Cute box using your palette colors
+with st.sidebar.expander("ℹ️ What does percentile mean?"):
     st.markdown(
-    f"""
-    <div style="
-        background-color:{PRIMARY_LIGHT};
-        border-radius:15px;
-        padding:20px;
-        box-shadow:0 4px 12px rgba(0,0,0,0.1);
-        margin-top:10px;
-        margin-bottom:20px;
-    ">
-        <h4 style="
-            color:{PRIMARY_DARK};
-            text-align:center;
-            margin-bottom:20px;
-            font-weight:600;
-        ">
-            💧 Water Consumption Summary
-        </h4>
-        <div style="
-            display:flex;
-            justify-content:space-around;
-            gap:20px;
-        ">
-            <div style="
-                background-color:{BG_COLOR};
-                padding:15px;
-                border-radius:12px;
-                text-align:center;
-                flex:1;
-                box-shadow:0 2px 6px rgba(0,0,0,0.08);
-            ">
-                <p style="margin:0; color:{TEXT_PRIMARY}; font-size:14px;">Total Consumption</p>
-                <p style="margin:5px 0 0 0; font-size:20px; font-weight:bold; color:{PRIMARY_DARK};">
-                    {total_consumption:.2f} m³
-                </p>
-            </div>
-            <div style="
-                background-color:{BG_COLOR};
-                padding:15px;
-                border-radius:12px;
-                text-align:center;
-                flex:1;
-                box-shadow:0 2px 6px rgba(0,0,0,0.08);
-            ">
-                <p style="margin:0; color:{TEXT_PRIMARY}; font-size:14px;">Average Daily</p>
-                <p style="margin:5px 0 0 0; font-size:20px; font-weight:bold; color:{PRIMARY_DARK};">
-                    {average_daily:.2f} m³/day
-                </p>
-            </div>
-        </div>
-    </div>
-    """,
-    unsafe_allow_html=True
-    )
+        """ 
+        Your **percentile** shows your census section's average water use compared to all sections in the city.
+        
+        **For example**: If your percentile is 74, this means your section uses more water than 74% of census sections.
+        - **Higher percentile** = higher consumption relative to others.
+        - **Lower percentile** = lower consumption compared to peers.
 
-    st.divider()
-
-
-    time_series = section_data.groupby("FECHA")["CONSUMO_REAL"].sum().reset_index()
-
-    fig = px.line(
-        time_series,
-        x="FECHA",
-        y="CONSUMO_REAL",
-        title=f"Water Consumption Over Time for Section {codi_censal}"
-    )
-
-   
-    muni_avg = df.groupby("FECHA")["CONSUMO_REAL"].mean().reset_index()
-    fig.add_scatter(x=muni_avg["FECHA"], y=muni_avg["CONSUMO_REAL"],
-                        mode="lines", name="Municipality Average")
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    st.divider()
-
-
-    st.markdown(
-    f"""
-    <div style="
-        display:flex;
-        flex-wrap:wrap;
-        justify-content:space-around;
-        gap:20px;
-        margin-top:25px;
-    ">
-    """
-    ,
-        unsafe_allow_html=True
-    )
-    st.subheader("Water Consumption Breakdown by Use Type")
-
-    # Aggregate consumption by category (US_AIGUA_GEST)
-    usage_breakdown = (
-        df_filtered.groupby("US_AIGUA_GEST")["CONSUMO_REAL"]
-        .sum()
-        .reset_index()
-    )
-
-    usage_breakdown = usage_breakdown.sort_values("CONSUMO_REAL", ascending=False)
-    total_section_consumption = usage_breakdown["CONSUMO_REAL"].sum()
-
-    # Compute percentages
-    usage_breakdown["percentage"] = (
-        usage_breakdown["CONSUMO_REAL"] / total_section_consumption * 100
-    )
-
-    for _, row in usage_breakdown.iterrows():
-        category = row["US_AIGUA_GEST"]
-        value = row["CONSUMO_REAL"]
-        pct = row["percentage"]
-
-        st.markdown(
-            f"""
-            <div style="
-                background-color:{PRIMARY_LIGHT};
-                padding:15px;
-                border-radius:12px;
-                width:250px;
-                text-align:center;
-                box-shadow:0 3px 10px rgba(0,0,0,0.1);
-            ">
-                <p style="font-size:14px; margin:0; color:{PRIMARY_DARK}; font-weight:bold;">
-                    {category}
-                </p>
-                <p style="font-size:20px; margin:5px 0 0 0; color:{TEXT_PRIMARY}; font-weight:600;">
-                    {value:.2f} m³
-                </p>
-                <p style="font-size:14px; color:{TEXT_SECONDARY}; margin:0;">
-                    {pct:.1f}% of total
-                </p>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
-
-    st.markdown("</div>", unsafe_allow_html=True)
-
-    st.divider()
+        """
+ )
 # -------------------------------
-# Consumption Analysis by Census Section
+# Summary cards
 # -------------------------------
-st.subheader("Top 10 Census Sections by Water Consumption")
-ici_census = df.groupby('SECCIO_CENSAL')['CONSUMO_REAL'].agg(['mean', 'sum', 'count']).reset_index()
-ici_census = ici_census.sort_values('sum', ascending=False)
+total_consumption = df_section["CONSUMO_REAL"].sum()
 
-# Select top 10 census sections by total consumption
-top_census = ici_census.nlargest(10, 'sum')
-top_census["SECCIO_CENSAL"] = top_census["SECCIO_CENSAL"].astype(str)
-top_census = top_census.sort_values("sum", ascending=False)
-top_census["SECCIO_CENSAL"] = pd.Categorical(
-    top_census["SECCIO_CENSAL"],
-    categories=top_census["SECCIO_CENSAL"],
-    ordered=True
-)
-fig, ax = plt.subplots(figsize=(10, 6))
-sns.barplot(
-    x='SECCIO_CENSAL',
-    y='sum',
-    data=top_census,
-    ax=ax,
-    order=top_census["SECCIO_CENSAL"] 
+avg_daily = (df_section.groupby("FECHA")["CONSUMO_REAL"].sum().mean())
+
+section_daily = (
+    df.groupby(["FECHA", "SECCIO_CENSAL_STR"])["CONSUMO_REAL"]
+    .sum()
+    .reset_index()
 )
 
-ax.set_xticklabels(ax.get_xticklabels(), rotation=90)
-ax.set_title('Top 10 Census Sections by Total Consumption')
-ax.set_ylabel('Total Consumption (m³)')
-ax.set_xlabel('Secció Censal')
-
-st.pyplot(fig)
-
-
-
-
-# -------------------------------
-# Water-Saving Tips
-# -------------------------------
-st.sidebar.info(
-    "💡 Water-Saving Tips:\n"
-    "- Take shorter showers.\n"
-    "- Fix leaking taps and pipes.\n"
-    "- Use water-efficient appliances.\n"
-    "- Collect rainwater for gardening."
+municipality_avg_ts = (
+    section_daily.groupby("FECHA")["CONSUMO_REAL"]
+    .mean()
+    .reset_index()
+    .rename(columns={"CONSUMO_REAL": "Municipality Avg"})
 )
 
-# -------------------------------
-# Download Data
-# -------------------------------
-if 'df_extended' in st.session_state:
-    st.download_button(
-        label="📥 Download My Consumption Data",
-        data=st.session_state['df_extended'].to_csv(index=False),
-        file_name=f"consumption_{st.session_state['poliza']}.csv",
-        mime="text/csv"
-    )
+municipality_avg_daily_per_section = municipality_avg_ts[
+    (municipality_avg_ts["FECHA"] >= start_date) & (municipality_avg_ts["FECHA"] <= end_date)
+]["Municipality Avg"].mean()
+
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.markdown(f"<div style='background:{PRIMARY_LIGHT};padding:12px;border-radius:10px;text-align:center;'><div style='color:{PRIMARY_DARK};font-weight:700'>💧 Total Consumption</div><div style='font-size:20px;font-weight:700;color:{TEXT_PRIMARY};margin-top:6px'>{total_consumption:.2f} m³</div></div>", unsafe_allow_html=True)
+with c2:
+    st.markdown(f"<div style='background:{SECONDARY_LIGHT};padding:12px;border-radius:10px;text-align:center;'><div style='color:{SECONDARY_DARK};font-weight:700'>📅 Avg per day</div><div style='font-size:20px;font-weight:700;color:{TEXT_PRIMARY};margin-top:6px'>{avg_daily:.2f} m³/day</div></div>", unsafe_allow_html=True)
+with c3:
+    st.markdown(f"<div style='background:{PRIMARY_LIGHT};padding:12px;border-radius:10px;text-align:center;'><div style='color:{PRIMARY_DARK};font-weight:700'>🏛 Municipality avg per day</div><div style='font-size:20px;font-weight:700;color:{TEXT_PRIMARY};margin-top:6px'>{municipality_avg_daily_per_section:.2f} m³/day</div></div>", unsafe_allow_html=True)
 
 st.divider()
+
+# -------------------------------
+# Time series plot
+# -------------------------------
+st.subheader("Consumption over time — Section vs Municipality average")
+full_dates = pd.date_range(start=start_date, end=end_date)
+section_ts = (df_section.groupby("FECHA")["CONSUMO_REAL"].sum().reset_index().rename(columns={"CONSUMO_REAL": "Section"}))
+combined = pd.merge(section_ts, municipality_avg_ts, on="FECHA", how="outer").sort_values("FECHA").fillna(0)
+
+
+# Plot
+fig_ts = px.line(
+    combined,
+    x="FECHA",
+    y=["Section", "Municipality Avg"],
+    labels={"value": "Consumption (m³)", "variable": "Series"},
+    title=f"Section {codi_censal} vs Municipality Avg per Section"
+)
+fig_ts.update_traces(mode="lines+markers")
+st.plotly_chart(fig_ts, use_container_width=True)
+
+
+st.divider()
+
+# -------------------------------
+# Use type breakdown
+# -------------------------------
+st.subheader("Consumption breakdown by use type")
+if "US_AIGUA_GEST" in df_section.columns:
+    breakdown = df_section.groupby("US_AIGUA_GEST")["CONSUMO_REAL"].sum().reset_index()
+    breakdown["pct"] = breakdown["CONSUMO_REAL"]/breakdown["CONSUMO_REAL"].sum()*100
+    fig_pie = px.pie(breakdown, values="CONSUMO_REAL", names="US_AIGUA_GEST", hole=0.45)
+    fig_pie.update_traces(textposition='inside', textinfo='percent+label')
+    st.plotly_chart(fig_pie, use_container_width=True)
+
+st.divider()
+
+# -------------------------------
+# Ranking
+# -------------------------------
+st.subheader("How your section ranks")
+row_mask = (df["FECHA"] >= start_date) & (df["FECHA"] <= end_date)
+df_filtered = df.loc[row_mask, ["FECHA", "SECCIO_CENSAL_STR", "CONSUMO_REAL"]]
+
+df_month = df_filtered 
+if not np.issubdtype(df_month["FECHA"].dtype, np.datetime64):
+    df_month["FECHA"] = pd.to_datetime(df_month["FECHA"])
+df_month["SECCIO_CENSAL_STR"] = df_month["SECCIO_CENSAL_STR"].astype("category")
+
+df_month["month"] = df_month["FECHA"].dt.to_period("M")
+monthly = (
+    df_month.groupby(["SECCIO_CENSAL_STR", "month"])["CONSUMO_REAL"]
+    .sum()
+    .reset_index()
+)
+ranking = (
+    monthly.groupby("SECCIO_CENSAL_STR")["CONSUMO_REAL"]
+    .mean()
+    .reset_index()
+    .rename(columns={"CONSUMO_REAL":"avg_monthly"})
+)
+
+# Your section mean
+my_section_avg = ranking.loc[ranking["SECCIO_CENSAL_STR"] == codi_censal, "avg_monthly"].values[0]
+peer_mean = ranking.loc[ranking["SECCIO_CENSAL_STR"] != codi_censal, "avg_monthly"].mean()
+percent_diff = (my_section_avg - peer_mean) / peer_mean * 100
+percentile = (ranking["avg_monthly"] < my_section_avg).mean() * 100
+if percent_diff > 0:
+    st.markdown(
+        f"""<div style='background:#e3f2fd;padding:14px;border-radius:7px'>
+        <b>💧 Your census section uses {percent_diff:.1f}% more water than similar sections.</b></div>""",
+        unsafe_allow_html=True
+    )
+else:
+    st.markdown(
+        f"""<div style='background:#e3f2fd;padding:14px;border-radius:7px'>
+        <b>💧 Your census section uses {abs(percent_diff):.1f}% less water than similar sections.</b></div>""",
+        unsafe_allow_html=True
+    )
+st.markdown(f"""<div style='background:#fce4ec;padding:14px;border-radius:7px'>
+    <b>📊 Your consumption is in the {percentile:.0f}th percentile citywide.</b></div>""", unsafe_allow_html=True)
+
+st.divider()
+
+# -------------------------------
+# Savings estimator
+# -------------------------------
+st.subheader("Quick savings estimator & tips")
+price_per_m3 = st.number_input("Approx. price per m³ (€)", value=1.50, step=0.1)
+reductions = [5, 10, 20]
+cols = st.columns(len(reductions))
+for pct, col in zip(reductions, cols):
+    reduced_m3 = total_consumption*(pct/100)
+    saved = reduced_m3*price_per_m3
+    col.markdown(f"<div style='background:{PRIMARY_LIGHT};padding:10px;border-radius:8px;text-align:center;'><div style='font-weight:700;color:{PRIMARY_DARK}'>{pct}%</div><div style='font-size:16px;font-weight:700;color:{TEXT_PRIMARY};margin-top:6px'>{reduced_m3:.2f} m³</div><div style='color:{TEXT_SECONDARY}'>≈ €{saved:.2f}</div></div>", unsafe_allow_html=True)
+
+st.markdown("**Tips:**")
+if "US_AIGUA_GEST" in df_section.columns:
+    top_use = df_section.groupby("US_AIGUA_GEST")["CONSUMO_REAL"].sum().idxmax()
+    top_pct = df_section.groupby("US_AIGUA_GEST")["CONSUMO_REAL"].sum().max()/df_section["CONSUMO_REAL"].sum()*100
+    if top_pct>=50:
+        st.markdown(f"- Most consumption ({top_pct:.0f}%) is from **{top_use}**.")
+    elif top_pct>=30:
+        st.markdown(f"- Top category **{top_use}** accounts for {top_pct:.0f}%.")
+    else:
+        st.markdown("- Consumption spread across categories — consider general water-saving measures.")
+st.markdown("- Fix leaking taps and pipes.")
+st.markdown("- Use water-efficient appliances and mindful gardening watering.")
+
+st.divider()
+
+
 
 # -------------------------------
 # Footer

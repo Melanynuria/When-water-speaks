@@ -4,6 +4,7 @@ import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 import plotly.express as px
+import plotly.graph_objects as go
 import os
 import sys
 from pathlib import Path
@@ -71,6 +72,10 @@ else:
     else:
         st.stop()
 
+
+# -------------------------------
+# Invoice input
+# -------------------------------
 polizas=df["POLIZA_SUMINISTRO"].unique().tolist()
 user_input=st.sidebar.text_input("Introduce your invoice:")
 
@@ -87,6 +92,9 @@ if user_input and len(filtered_poliza)==0:
 poliza_id= st.sidebar.selectbox("Matching invoices",filtered_poliza)
 threshold=st.sidebar.slider("Anomaly threshold", 1.0,5.0,2.0,0.1)
 
+# -------------------------------
+# Sidebar explanations
+# ------------------------------
 with st.sidebar.expander("📘 What is the forecast_z_score?"):
     st.markdown(
         """
@@ -147,17 +155,20 @@ with st.sidebar.expander("💰 How can you use forecast anomalies to save money?
     """
 )
 
-#caching
+# -------------------------------
+# Forecast & anomaly detection
+# -------------------------------
 @st.cache_data(show_spinner=True)
 def cached_forecast(df,poliza_id):
     total,forecast_df, df_extended=call_predict_next_month_total_consumption(df, poliza_id)
+    df_extended["is_forecast"] = False
+    forecast_df["is_forecast"] = True
     return total, forecast_df, df_extended
 
 @st.cache_data
 def compute_base(df,poliza_id):
     total,forecast_df,df_extended= cached_forecast(df,poliza_id)
     df_analysis=df_extended.copy()
-    #rolling statistics
     df_analysis["rolling_mean"]=df_analysis["CONSUMO_REAL"].rolling(window=7,min_periods=3).mean()
     df_analysis["rolling_std"]=df_analysis["CONSUMO_REAL"].rolling(window=7,min_periods=3).std()
     return df_analysis,forecast_df
@@ -182,7 +193,9 @@ def detect_anomalies(df_analysis,df_forecast,threshold):
 
 df_analysis,anomalies, df_forecasting, anomalies_forecast=detect_anomalies(df_analysis, df_forecast,threshold)
 
-#show results
+# -------------------------------
+# Results
+# -------------------------------
 st.subheader(f"📊Results for invoice {poliza_id}")
 col1,col2=st.columns(2)
 
@@ -200,15 +213,34 @@ with col2:
 
 st.divider()
 
-#plot anomalies
+# -------------------------------
+# Plot anomalies
+# -------------------------------
 st.subheader("📈 Anomalies graph")
+fig = go.Figure()
 
-hist = df_analysis[df_analysis["is_forecast"] == False]
-forecast = df_analysis[df_analysis["is_forecast"] == True]
-fig = px.line(hist, x="FECHA", y="CONSUMO_REAL", labels={"CONSUMO_REAL":"Consumption"}, title=f"Invoice {poliza_id}")
-fig.add_scatter(x=anomalies["FECHA"], y=anomalies["CONSUMO_REAL"], mode="markers", marker_color="red", name="Historical Anomaly")
-fig.add_scatter(x=df_forecasting["FECHA"], y=df_forecasting["CONSUMO_REAL"], mode="lines", line=dict(dash="dashdot", color=PRIMARY_DARK, width=5), name="Forecasted Consumption")
-fig.add_scatter(x=anomalies_forecast["FECHA"], y=anomalies_forecast["CONSUMO_REAL"], mode="markers", marker_color="orange", name="Forecast Anomaly")
+# Historical consumption
+hist = df_analysis[~df_analysis["is_forecast"]]
+fig.add_trace(go.Scatter(x=hist["FECHA"], y=hist["CONSUMO_REAL"],
+                         mode="lines", name="Historical Consumption",
+                         line=dict(color=PRIMARY_DARK)))
+
+# Historical anomalies
+fig.add_trace(go.Scatter(x=anomalies["FECHA"], y=anomalies["CONSUMO_REAL"],
+                         mode="markers", name="Historical Anomaly", marker_color="red", marker_size=8))
+
+# Forecasted consumption
+fig.add_trace(go.Scatter(x=df_forecasting["FECHA"], y=df_forecasting["CONSUMO_REAL"],
+                         mode="lines", name="Forecasted Consumption",
+                         line=dict(color=PRIMARY_LIGHT, dash="dash")))
+
+# Forecast anomalies
+fig.add_trace(go.Scatter(x=anomalies_forecast["FECHA"], y=anomalies_forecast["CONSUMO_REAL"],
+                         mode="markers", name="Forecast Anomaly", marker_color="orange", marker_size=8))
+
+fig.update_layout(title=f"Consumption & Anomalies for {poliza_id}",
+                  xaxis_title="Date", yaxis_title="Consumption (m³)", template="plotly_white")
+
 st.plotly_chart(fig, use_container_width=True)
 st.divider()
 
