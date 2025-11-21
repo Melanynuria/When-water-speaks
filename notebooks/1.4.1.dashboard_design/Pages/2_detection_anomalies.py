@@ -235,3 +235,23 @@ with tab2:
 if st.sidebar.button("Clear cache"):
     st.cache_data.clear()
     st.experimental_rerun()
+
+
+# -------------------------------
+# Footer
+# -------------------------------
+st.markdown(f"""
+<div style="text-align: center; padding: 20px; color: #050505; font-size: 12px;">
+<p>
+👥 Team members of Datasplash: Melany Nuria Condori, Judit Barba, Laura Peñalver, Xènia Fàbrega, Ella Lanqvist and Irene García
+<br>
+📂 <strong>Github Repository:</strong> <a href="https://github.com/Melanynuria/When-water-speaks.git" target="_blank" style="color: #5B9CBF; font-weight: bold;">View on GitHub</a>
+<br>
+🔒 <strong>Data Privacy & Security:</strong> All consumption data is encrypted and processed securely.
+<br>
+📞 <strong>Support:</strong> <a href="mailto:contact@aiguesdebarcelona.cat" style="color: #5B9CBF; font-weight: bold;">contact@aiguesdebarcelona.cat</a>
+<br>
+© 2025 Aigües de Barcelona - Water Consumption Analytics Platform
+</p>
+</div>
+""", unsafe_allow_html=True)
