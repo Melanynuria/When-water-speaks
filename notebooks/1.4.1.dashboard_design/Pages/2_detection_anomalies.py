@@ -87,6 +87,27 @@ if user_input and len(filtered_poliza)==0:
 poliza_id= st.sidebar.selectbox("Matching invoices",filtered_poliza)
 threshold=st.sidebar.slider("Anomaly threshold", 1.0,5.0,2.0,0.1)
 
+with st.sidebar.expander("📘 What is the forecast_z_score?"):
+    st.markdown(
+        """
+        The **forecast_z_score** measures how unusual the predicted consumption is compared to your historical patterns:
+
+        ### How it is calculated:
+        **forecast_z_score** = (Forecasted consumption - Rolling mean) / Rolling std
+
+        Where:
+        - **Rolling Mean** = average of your last 7 days of consumption  
+        - **Rolling Std** = typical day-to-day variation  
+
+        ### How to interpret it:
+        - |score| > threshold → **Anomaly**  
+        - **Positive anomaly** → risk of upcoming high bill 
+        - **Negative anomaly** → meter issue, outage, or unusual reduction  
+
+        The **higher** the score, the **stronger** the expected deviation.
+        """
+        )
+
 with st.sidebar.expander("ℹ️ What is the threshold?"):
     st.markdown(
         """
@@ -96,24 +117,35 @@ with st.sidebar.expander("ℹ️ What is the threshold?"):
         """
         )
     
-with st.sidebar.expander("💰 How can you use forecast anomalies to save money?"):
+with st.sidebar.expander("🎚️ How should you use the threshold?"):
+    st.markdown(
+    """
+        Adjust **threshold** as you wish:
+        - **Low threshold** → see more alerts and prevent sooner
+        - **High threshold** → only very important alerts.
+        **Tip:** Start with **2.0** and adjust based on how many alerts you want.
+
+    """
+)
+    
+with st.sidebar.expander("🔍 What are forecast anomalies?"):
     st.markdown(
     """
         Anomalies in **forecasted consumption** can indicate:
         - 🔺 **Unexpected consumption increases** → could mean a poorly configured appliance or excessive use.
         - 🔻 **Sudden drops** → could indicate meter errors or outages.
-
+    """
+) 
+with st.sidebar.expander("💰 How can you use forecast anomalies to save money?"):
+    st.markdown(
+    """
         **How does this help you save money?**
         - If the model detects that your future consumption will be **higher than normal**, you can take action before the bill arrives.
         - You can adjust habits, **check appliances** or **possible leaks**.
         - Alerts allow you to **avoid surprises** and better control your consumption.
 
-        Adjust threshold as you wish:
-        - **Low threshold** → see more alerts and prevent sooner
-        - **High threshold** → only very important alerts.
-
     """
-) 
+)
 
 #caching
 @st.cache_data(show_spinner=True)
@@ -185,6 +217,7 @@ st.divider()
 #Only show basic information
 hist_cols=["FECHA","CONSUMO_REAL","is_anomaly"]
 forecast_cols=["FECHA","CONSUMO_REAL","forecast_z_score","forecast_is_anomaly"]
+
 st.subheader("📄 Latest anomalies detected")
 tab1,tab2=st.tabs(["Historical", "Forecast"])
 def color_anomalies(val):
