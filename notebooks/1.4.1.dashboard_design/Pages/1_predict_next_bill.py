@@ -64,6 +64,10 @@ st.markdown(
 
 st.divider()
 
+polizas=df["POLIZA_SUMINISTRO"].unique().tolist()
+
+
+
 # -------------------------------
 # User input
 # -------------------------------
@@ -72,8 +76,11 @@ st.divider()
 # -------------------------------
 col1, col2 = st.columns([0.6, 0.4])
 
+
 with col1:
-    poliza = st.text_input("Enter your POLIZA_SUMINISTRO:", "")
+    poliza = st.selectbox("Matching invoices",polizas)
+
+
 
 with col2:
     service_type = st.selectbox(
@@ -144,12 +151,6 @@ if 'df_extended' in st.session_state:
                 f"is below last year's average ({expected_avg:.2f} liters). Keep up the good work!"
             )
 
-        # Progress bar visual
-        progress_pct = min(total_pred / expected_avg, 2)
-        st.progress(progress_pct)
-        st.markdown(
-            f"Predicted consumption is **{progress_pct*100:.1f}%** of last year's average."
-        )
 
 st.divider()
 
